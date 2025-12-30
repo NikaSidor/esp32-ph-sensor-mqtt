@@ -1,0 +1,287 @@
+# Home Assistant Configuration для ESP32 pH Sensor
+# Добавьте этот код в ваш configuration.yaml
+
+mqtt:
+  sensor:
+    # ============================================
+    # pH Sensor - Основное значение pH
+    # ============================================
+    - name: "pH Sensor"
+      unique_id: "esp32_ph_sensor_value"
+      state_topic: "sensor/ph/value"
+      value_template: "{{ value_json.pH }}"
+      unit_of_measurement: "pH"
+      device_class: "ph"
+      state_class: "measurement"
+      icon: "mdi:ph"
+      availability_topic: "sensor/ph/status"
+      availability_template: "{{ 'online' if value_json.status == 'online' else 'offline' }}"
+      json_attributes_topic: "sensor/ph/value"
+      json_attributes_template: "{{ {'voltage': value_json.voltage, 'timestamp': value_json.timestamp} | tojson }}"
+      
+    # ============================================
+    # pH Sensor - Напряжение
+    # ============================================
+    - name: "pH Sensor Voltage"
+      unique_id: "esp32_ph_sensor_voltage"
+      state_topic: "sensor/ph/value"
+      value_template: "{{ value_json.voltage | round(3) }}"
+      unit_of_measurement: "V"
+      device_class: "voltage"
+      state_class: "measurement"
+      icon: "mdi:flash"
+      availability_topic: "sensor/ph/status"
+      availability_template: "{{ 'online' if value_json.status == 'online' else 'offline' }}"
+      
+    # ============================================
+    # pH Sensor - Статус устройства
+    # ============================================
+    - name: "pH Sensor Status"
+      unique_id: "esp32_ph_sensor_status"
+      state_topic: "sensor/ph/status"
+      value_template: "{{ value_json.status }}"
+      icon: "mdi:check-network"
+      
+    # ============================================
+    # pH Sensor - IP адрес устройства
+    # ============================================
+    - name: "pH Sensor IP"
+      unique_id: "esp32_ph_sensor_ip"
+      state_topic: "sensor/ph/status"
+      value_template: "{{ value_json.ip }}"
+      icon: "mdi:ip-network"
+
+# ============================================
+# Template Sensors (опционально)
+# ============================================
+template:
+  - sensor:
+      # Классификация pH (кислотность/щелочность)
+      - name: "pH Classification"
+        unique_id: "ph_classification"
+        state: >
+          {% set ph = states('sensor.ph_sensor') | float(7) %}
+          {% if ph < 6.5 %}
+            Кислая
+          {% elif ph > 7.5 %}
+            Щелочная
+          {% else %}
+            Нейтральная
+          {% endif %}
+        icon: >
+          {% set ph = states('sensor.ph_sensor') | float(7) %}
+          {% if ph < 6.5 %}
+            mdi:ph-minus
+          {% elif ph > 7.5 %}
+            mdi:ph-plus
+          {% else %}
+            mdi:ph
+          {% endif %}
+      
+      # Время последнего обновления
+      - name: "pH Last Update"
+        unique_id: "ph_last_update"
+        state: >
+          {{ state_attr('sensor.ph_sensor', 'timestamp') | int | timestamp_local if state_attr('sensor.ph_sensor', 'timestamp') else 'Неизвестно' }}
+        icon: "mdi:clock-outline"
+
+# ============================================
+# Автоматизации (опционально)
+# ============================================
+automation:
+  # Уведомление при слишком низком pH
+  - alias: "Предупреждение: Низкий pH"
+    description: "Отправляет уведомление когда pH ниже 6.0"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.ph_sensor
+        below: 6.0
+        for:
+          minutes: 5
+    action:
+      - service: notify.notify
+        data:
+          title: "⚠️ Предупреждение: Низкий pH"
+          message: "pH воды слишком низкий: {{ states('sensor.ph_sensor') }}"
+  
+  # Уведомление при слишком высоком pH
+  - alias: "Предупреждение: Высокий pH"
+    description: "Отправляет уведомление когда pH выше 8.0"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.ph_sensor
+        above: 8.0
+        for:
+          minutes: 5
+    action:
+      - service: notify.notify
+        data:
+          title: "⚠️ Предупреждение: Высокий pH"
+          message: "pH воды слишком высокий: {{ states('sensor.ph_sensor') }}"
+  
+  # Уведомление при потере связи с датчиком
+  - alias: "Предупреждение: pH датчик офлайн"
+    description: "Отправляет уведомление когда датчик теряет связь"
+    trigger:
+      - platform: state
+        entity_id: sensor.ph_sensor_status
+        to: "offline"
+        for:
+          minutes: 2
+    action:
+      - service: notify.notify
+        data:
+          title: "🔴 pH датчик недоступен"
+          message: "Датчик pH потерял связь. Проверьте устройство."
+
+# ============================================
+# Lovelace UI Cards
+# ============================================
+# Добавьте эти карточки в ваш Lovelace dashboard
+
+# Карточка 1: Основная информация
+type: entities
+title: pH Monitoring
+entities:
+  - entity: sensor.ph_sensor
+    name: pH Value
+    icon: mdi:ph
+  - entity: sensor.ph_classification
+    name: Classification
+  - entity: sensor.ph_sensor_voltage
+    name: Sensor Voltage
+  - entity: sensor.ph_sensor_status
+    name: Device Status
+  - entity: sensor.ph_sensor_ip
+    name: Device IP
+  - entity: sensor.ph_last_update
+    name: Last Update
+
+# Карточка 2: Gauge (стрелочный индикатор)
+type: gauge
+entity: sensor.ph_sensor
+name: pH Level
+unit: pH
+min: 0
+max: 14
+severity:
+  green: 6.5
+  yellow: 6.0
+  red: 0
+needle: true
+segments:
+  - from: 0
+    color: '#db4437'
+  - from: 6.0
+    color: '#ff9800'
+  - from: 6.5
+    color: '#0f9d58'
+  - from: 7.5
+    color: '#ff9800'
+  - from: 8.5
+    color: '#db4437'
+
+# Карточка 3: История (график)
+type: history-graph
+title: pH History (24h)
+entities:
+  - entity: sensor.ph_sensor
+hours_to_show: 24
+refresh_interval: 0
+
+# Карточка 4: Статистика
+type: statistics-graph
+title: pH Statistics
+entities:
+  - sensor.ph_sensor
+stat_types:
+  - mean
+  - min
+  - max
+chart_type: line
+period:
+  calendar:
+    period: day
+
+# Карточка 5: Горизонтальный стек с индикаторами
+type: horizontal-stack
+cards:
+  - type: sensor
+    entity: sensor.ph_sensor
+    name: Current pH
+    graph: line
+    detail: 1
+  - type: sensor
+    entity: sensor.ph_sensor_voltage
+    name: Voltage
+    graph: line
+    detail: 2
+
+# Карточка 6: Полная панель мониторинга
+type: vertical-stack
+cards:
+  - type: markdown
+    content: |
+      ## 💧 pH Water Monitor
+      Мониторинг pH воды в реальном времени
+  
+  - type: gauge
+    entity: sensor.ph_sensor
+    name: pH Level
+    min: 0
+    max: 14
+    severity:
+      green: 6.5
+      yellow: 6.0
+      red: 0
+  
+  - type: entities
+    entities:
+      - entity: sensor.ph_sensor
+        name: pH Value
+        icon: mdi:ph
+      - entity: sensor.ph_classification
+        name: Classification
+      - entity: sensor.ph_sensor_voltage
+        name: Voltage
+      - type: divider
+      - entity: sensor.ph_sensor_status
+        name: Status
+      - entity: sensor.ph_last_update
+        name: Last Update
+  
+  - type: history-graph
+    entities:
+      - entity: sensor.ph_sensor
+    hours_to_show: 24
+    refresh_interval: 0
+
+# ============================================
+# Recorder Configuration (опционально)
+# ============================================
+# Настройка хранения данных в базе
+recorder:
+  include:
+    entities:
+      - sensor.ph_sensor
+      - sensor.ph_sensor_voltage
+      - sensor.ph_sensor_status
+  
+  # Хранить данные 90 дней
+  purge_keep_days: 90
+
+# ============================================
+# InfluxDB Integration (опционально)
+# ============================================
+# Для долгосрочного хранения и анализа данных
+influxdb:
+  host: localhost
+  port: 8086
+  database: home_assistant
+  username: !secret influxdb_username
+  password: !secret influxdb_password
+  include:
+    entities:
+      - sensor.ph_sensor
+      - sensor.ph_sensor_voltage
+
